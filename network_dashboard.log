@@ -1,0 +1,8 @@
+14:59:00  === scan start (platform=win32, frozen=False) ===
+14:59:00  primary IP = 172.24.219.122
+14:59:00  all interfaces: ['eth0', 'docker0', 'br-1c9d135b02f7', 'lo']
+14:59:00  selected Wi-Fi/Ethernet interfaces: ['eth0']
+14:59:00  Scanning 172.24.208.0/20 on eth0 …
+14:59:00    eth0: 1 host(s) in ARP cache after probe
+14:59:00  Total: 2 device(s)
+
