@@ -2,9 +2,18 @@ import sys
 import os
 import shutil
 import subprocess
+import netifaces
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import (
+     Qt,
+     QTimer,
+     QThread,
+     pyqtSignal,
+     QEasingCurve,
+     QPropertyAnimation,
+     QSequentialAnimationGroup
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -15,10 +24,474 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QMainWindow,
     QPushButton,
-    QMessageBox
+    QGraphicsOpacityEffect,
+    QMessageBox,
+    QSplashScreen,
+    QProgressBar
+)
+
+from PyQt6.QtGui import (
+    QFont,
+    QPixmap
 )
 
 from scanner import scan_network
+
+class SplashScreen(QWidget):
+
+    def __init__(self):
+        super().__init__()
+
+        #Window
+        self.setWindowTitle("CUBI-5 Network Manager")
+        self.setFixedSize(900, 650)
+
+        self.setStyleSheet("""
+            QWidget{
+                background-color:#05080F;
+                color:#E8EAED;
+                font-family:Consolas;
+            }
+        """)
+
+        #layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.setSpacing(18)
+
+        # ---------------------------------------------------------
+        # Title
+        # ---------------------------------------------------------
+
+        self.title = QLabel("NETWORK MANAGER")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.title.setStyleSheet("""
+            QLabel{
+                font-size:34px;
+                font-weight:bold;
+                letter-spacing:4px;
+                color:#E8EAED;
+            }
+        """)
+
+        main_layout.addWidget(self.title)
+        # ---------------------------------------------------------
+        # Subtitle
+        # ---------------------------------------------------------
+
+        self.subtitle = QLabel(
+            "Enterprise Network Monitoring System"
+        )
+
+        self.subtitle.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.subtitle.setStyleSheet("""
+            QLabel{
+                font-size:15px;
+                color:#9AA7B4;
+            }
+        """)
+
+        main_layout.addWidget(self.subtitle)
+
+        # ---------------------------------------------------------
+        # Divider
+        # ---------------------------------------------------------
+
+        divider = QFrame()
+
+        divider.setFrameShape(QFrame.Shape.HLine)
+
+        divider.setFixedWidth(650)
+
+        divider.setStyleSheet("""
+            background:#5A6B7D;
+            max-height:1px;
+            border:none;
+        """)
+
+        main_layout.addWidget(divider)
+
+        # ---------------------------------------------------------
+        # Loading Message
+        # ---------------------------------------------------------
+
+        self.loading_message = QLabel(
+            "Initializing Application..."
+        )
+
+        self.loading_message.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.loading_message.setStyleSheet("""
+            QLabel{
+                font-size:18px;
+                font-weight:bold;
+                color:#E8EAED;
+            }
+        """)
+
+        main_layout.addWidget(self.loading_message)
+
+        # ---------------------------------------------------------
+        # Progress Bar
+        # ---------------------------------------------------------
+
+        self.progress = QProgressBar()
+
+        self.progress.setFixedWidth(420)
+
+        self.progress.setFixedHeight(12)
+
+        self.progress.setRange(0,100)
+
+        self.progress.setValue(0)
+
+        self.progress.setTextVisible(False)
+
+        self.progress.setStyleSheet("""
+
+            QProgressBar{
+
+                background:#12161C;
+
+                border:1px solid #5A6B7D;
+
+                border-radius:6px;
+
+            }
+
+            QProgressBar::chunk{
+
+                background:#3DDC84;
+
+                border-radius:6px;
+
+            }
+
+        """)
+
+        main_layout.addWidget(
+            self.progress,
+            alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
+        # ---------------------------------------------------------
+        # Percentage
+        # ---------------------------------------------------------
+
+        self.percent = QLabel("0 %")
+
+        self.percent.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.percent.setStyleSheet("""
+            QLabel{
+                font-size:16px;
+                font-weight:bold;
+                color:#3DDC84;
+            }
+        """)
+
+        main_layout.addWidget(self.percent)
+
+        # ---------------------------------------------------------
+        # Status Checklist
+        # ---------------------------------------------------------
+
+        self.checklist = QLabel(
+            "○ Loading Scanner\n\n"
+            "○ Loading Network Module\n\n"
+            "○ Detecting Interfaces\n\n"
+            "○ Scanning Network\n\n"
+            "○ Creating Dashboard"
+        )
+
+        self.checklist.setStyleSheet("""
+            QLabel{
+                font-size:14px;
+                color:#E8EAED;
+            }
+        """)
+
+        main_layout.addWidget(self.checklist)
+
+        # ---------------------------------------------------------
+        # Interface Information
+        # ---------------------------------------------------------
+
+        self.interfaces = QLabel(
+            "Detected Interfaces\n\n"
+            "○ enp45s0\n"
+            "○ enp46s0"
+        )
+
+        self.interfaces.setStyleSheet("""
+            QLabel{
+                font-size:14px;
+                color:#9AA7B4;
+            }
+        """)
+
+        main_layout.addWidget(self.interfaces)
+
+        # ---------------------------------------------------------
+        # Device Counter
+        # ---------------------------------------------------------
+
+        self.device_counter = QLabel(
+            "Devices Found : 0"
+        )
+
+        self.device_counter.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.device_counter.setStyleSheet("""
+            QLabel{
+                font-size:15px;
+                color:#3DDC84;
+                font-weight:bold;
+            }
+        """)
+
+        main_layout.addWidget(self.device_counter)
+
+        # ---------------------------------------------------------
+        # Status Indicator
+        # ---------------------------------------------------------
+
+        self.status = QLabel(
+            "🟢 Initializing"
+        )
+
+        self.status.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.status.setStyleSheet("""
+            QLabel{
+                font-size:15px;
+                color:#3DDC84;
+                font-weight:bold;
+            }
+        """)
+
+        main_layout.addWidget(self.status)
+
+        main_layout.addStretch()
+        self.detect_interfaces()
+
+        self.fade_in_animation()
+
+        self.start_loading()
+
+        #self.update_loading(10,"Loading Network Scanner...")
+
+        # ---------------------------------------
+        # Detect Ethernet Interfaces
+        # ---------------------------------------
+
+    def interface_connected(self,interface):
+            try:
+                with open(f"/sys/class/net/{interface}/operstate", "r") as f:
+                   return f.read().strip() == "up"
+            except Exception:
+                   return False
+
+
+    def detect_interfaces(self):
+
+        text = "Detected Interfaces\n\n"
+
+        if self.interface_connected("enp45s0"):
+           text += "✓ enp45s0\n"
+        else:
+           text += "⚠ enp45s0 (No Cable)\n"
+
+        if self.interface_connected("enp46s0"):
+           text += "✓ enp46s0"
+        else:
+           text += "⚠ enp46s0 (No Cable)"
+
+        self.interfaces.setText(text)
+
+    def fade_in_animation(self):
+
+       self.opacity_effect = QGraphicsOpacityEffect(self)
+
+       self.setGraphicsEffect(self.opacity_effect)
+
+       self.fade_animation = QPropertyAnimation(
+        self.opacity_effect,
+        b"opacity"
+    )
+
+       self.fade_animation.setDuration(500)
+
+       self.fade_animation.setStartValue(0)
+
+       self.fade_animation.setEndValue(1)
+
+       self.fade_animation.start()
+
+    def start_loading(self):
+
+        self.worker = ScanWorker()
+
+        self.worker.progress.connect(
+        self.update_progress
+    )
+
+        self.worker.finished.connect(
+        self.loading_finished
+    )
+
+        self.worker.error.connect(
+        self.loading_error
+    )
+
+        self.worker.start()
+
+    def loading_finished(self, devices):
+
+        self.worker.quit()
+        self.worker.wait()
+
+       # -----------------------------
+       # Finish Splash Screen
+       # -----------------------------
+        self.progress.setValue(100)
+
+        self.percent.setText("100%")
+
+        self.loading_message.setText(
+        "✓ Initialization Complete\n\nOpening Dashboard..."
+    )
+
+        self.status.setText("🟢 Ready")
+
+        self.checklist.setText(
+
+        "✓ Loading Scanner\n\n"
+
+        "✓ Loading Network Module\n\n"
+
+        "✓ Detecting Interfaces\n\n"
+
+        "✓ Scanning Network\n\n"
+
+        "✓ Creating Dashboard"
+
+    )
+
+        QApplication.processEvents()
+
+        self.dashboard = Dashboard()
+
+        self.dashboard._on_scan_done(devices)
+
+        # Wait 600 ms before opening dashboard
+        QTimer.singleShot(600, self.finish_loading)
+
+    def finish_loading(self):
+
+        self.dashboard.show()
+
+        self.close()
+
+
+    def update_progress(self, progress, message):
+        if message.startswith("DEVICE_COUNT:"):
+
+           count = int(message.split(":")[1])
+
+           self.device_counter.setText(
+
+           f"Devices Found : {count}"
+
+        )
+           QApplication.processEvents()
+           return
+
+        self.progress.setValue(progress)
+
+        self.percent.setText(f"{progress}%")
+
+        self.loading_message.setText(message)
+
+    # --------------------------
+    # Status Indicator
+    # --------------------------
+
+        if progress < 20:
+           self.status.setText("🟢 Initializing")
+        elif progress < 90:
+           self.status.setText("🟢 Scanning Network")
+        else:
+           self.status.setText("🟢 Finalizing")
+
+
+    # --------------------------
+    # Detect Interfaces
+    # --------------------------
+        if progress >= 20:
+           self.detect_interfaces()
+
+    # --------------------------
+    # Checklist
+    # --------------------------
+
+        scanner = "○"
+        network = "○"
+        interface = "○"
+        scan = "○"
+        dashboard = "○"
+
+        if progress >= 5:
+          scanner = "✓"
+
+        if progress >= 15:
+          network = "✓"
+
+        if progress >= 35:
+          interface = "✓"
+
+        if progress >= 60:
+           scan = "✓"
+
+        if progress >= 95:
+           dashboard = "✓"
+
+        self.checklist.setText(
+
+         f"{scanner} Loading Scanner\n\n"
+
+        f"{network} Loading Network Module\n\n"
+
+        f"{interface} Detecting Interfaces\n\n"
+
+        f"{scan} Scanning Network\n\n"
+
+        f"{dashboard} Creating Dashboard"
+
+    )
+
+        QApplication.processEvents()
+
+    def loading_error(self, error):
+
+        QMessageBox.critical(
+        self,
+        "Scanner Error",
+        error
+    )
+        self.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,18 +503,35 @@ from scanner import scan_network
 
 class ScanWorker(QThread):
 
-    # Emitted with the device list when the scan succeeds.
+    progress = pyqtSignal(int, str)
+
     finished = pyqtSignal(list)
-    # Emitted with an error string if the scan raises an exception.
-    error    = pyqtSignal(str)
+
+    error = pyqtSignal(str)
 
     def run(self):
-        try:
-            devices = scan_network()
-            self.finished.emit(devices)
-        except Exception as exc:
-            self.error.emit(str(exc))
 
+
+      print("========== ScanWorker STARTED ==========")
+
+      try:
+        devices = scan_network(
+            progress_callback=self.progress.emit
+        )
+
+        print("========== Scan Complete ==========")
+        print(f"Devices = {len(devices)}")
+
+        self.finished.emit(devices)
+
+        print("========== Finished Signal Sent ==========")
+
+      except Exception as e:
+
+        import traceback
+        traceback.print_exc()
+
+        self.error.emit(str(e))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SSH helper
@@ -57,6 +547,7 @@ def open_ssh_terminal(
     the common emulators). Returns True if a process was launched.
     """
     ssh_target = f"{username}@{ip}"
+    print(f"[SSH] Target = {ssh_target}")
 
     # ── Windows ────────────────────────────────────────────────────────────
     if sys.platform == "win32":
@@ -68,6 +559,7 @@ def open_ssh_terminal(
             else:
                 # `start` is a cmd builtin, so go through the shell; /k keeps
                 # the window open after the session ends.
+
                 subprocess.Popen(
                     f'start "SSH {ssh_target}" cmd /k ssh {ssh_target}',
                     shell=True,
@@ -106,11 +598,12 @@ def open_ssh_terminal(
 
     for cmd in terminals:
         if shutil.which(cmd[0]):
+            print(f"[SSH] Launching {' '.join(cmd)}")
             try:
                 subprocess.Popen(cmd)
                 return True
-            except Exception as exc:
-                print(f"[SSH] {cmd[0]} failed: {exc}")
+            except Exception as e:
+                print(e)
 
     return False
 
@@ -129,7 +622,7 @@ class DeviceCard(QWidget):
     def build_ui(self):
 
         outer = QVBoxLayout()
-        outer.setContentsMargins(12, 10, 12, 10) #card margin 
+        outer.setContentsMargins(12, 10, 12, 10) #card margin
         outer.setSpacing(6)
 
         # ── Heading ──────────────────────────────────────────────────────────
@@ -156,6 +649,16 @@ class DeviceCard(QWidget):
         fields = [
             ("IP Address",  self.device["ip"],                  None),
             ("Status",      self.device["status"],              status_color),
+            ("Operating System","🐧 Ubuntu"
+              if self.device["os"] == "Ubuntu"
+              else
+              "🪟 Windows"
+              if self.device["os"] == "Windows"
+              else
+              "⚠ Unknown",
+
+              None),
+
             ("MAC Address", self.device["mac"],                 None),
             ("Vendor",      self.device["vendor"],              None),
             ("Type",        self.device["device_type"],         None),
@@ -241,18 +744,43 @@ class DeviceCard(QWidget):
 
         self.setLayout(outer)
         self.setMinimumSize(280, 300) #card size
+        # --------------------------------------------------
+        # Card Colour based on Operating System
+        # --------------------------------------------------
+
+        if self.device["os"] == "Ubuntu":
+
+           background = "#10261A"
+           border = "#3DDC84"
+
+        elif self.device["os"] == "Windows":
+
+           background = "#11243D"
+           border = "#3B82F6"
+
+        else:
+
+           background = "#2A1C12"
+           border = "#F59E0B"
         self.setObjectName("deviceCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet("""
-            QWidget#deviceCard {
-                background-color: #12161c;
-                border: 2px solid #5a6b7d;
-                border-radius: 6px;
-            }
-            QWidget#deviceCard:hover {
-                background-color: #181d25;
-                border: 2px solid #7c8da0;
-            }
+        self.setStyleSheet(f"""
+            QWidget#deviceCard {{
+
+            background-color: {background};
+
+            border:2px solid {border};
+
+            border-radius:6px;
+
+            }}
+
+            QWidget#deviceCard:hover {{
+            background-color:#181D25;
+
+            border:2px solid {border};
+
+            }}
         """)
 
     @staticmethod
@@ -265,33 +793,51 @@ class DeviceCard(QWidget):
 
     def _on_ssh_clicked(self):
 
+        print("SSH Button Clicked")
+
         ip = self.device["ip"]
+        if self.device.get("os") == "Unknown":
 
-        hostname = self.device["name"].lower()
+            box = QMessageBox()
 
-        username = hostname
+            box.setWindowTitle("Operating System Detection")
 
-        if not open_ssh_terminal(
-            ip,
-            username
-         ):
+            box.setIcon(QMessageBox.Icon.Warning)
 
-            box = QMessageBox(self)
+            box.setText("Unable to determine Operating System")
 
-            box.setWindowTitle(
-            "SSH — No Terminal Found"
+            box.setInformativeText(
+
+            f"Device name : {self.device['name']}\n"
+            f"IP Address : {ip}\n\n"
+            "This Device cannot be accessed using SSH"
             )
 
-            box.setIcon(
-            QMessageBox.Icon.Warning
-            )
-
-            box.setText(
-            f"No terminal emulator found "
-            f"to SSH into:\n{ip}"
-            )
-
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
             box.exec()
+            return
+
+
+        username = (
+        self.device["name"]
+        .replace("(THIS DEVICE)", "")
+        .strip()
+        .lower()
+    )
+
+        if not open_ssh_terminal(ip, username):
+
+           box = QMessageBox()
+
+           box.setWindowTitle("SSH")
+
+           box.setIcon(QMessageBox.Icon.Warning)
+
+           box.setText(
+            f"Unable to open SSH terminal for\n{username}@{ip}"
+        )
+
+           box.exec()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dashboard main window
@@ -314,9 +860,6 @@ class Dashboard(QMainWindow):
         self.timer.timeout.connect(self._start_scan)
         self.timer.start(30_000) #30 seconds reset
 
-        # Kick off the first scan immediately (runs in background — no freeze).
-        self._start_scan()
-
     # ── scan management ───────────────────────────────────────────────────────
 
     def _start_scan(self):
@@ -327,15 +870,33 @@ class Dashboard(QMainWindow):
         self.scan_info.setText("⟳  Scanning network …")
 
         self._worker = ScanWorker()
+        self._worker.progress.connect(self.update_dashboard_progress)
         self._worker.finished.connect(self._on_scan_done)
         self._worker.error.connect(self._on_scan_error)
         self._worker.start()
 
+    def update_dashboard_progress(self, progress, message):
+
+        # Ignore device counter messages
+        if message.startswith("DEVICE_COUNT:"):
+           return
+
+        self.scan_info.setText(message)
+
+        QApplication.processEvents()
+
     def _on_scan_done(self, devices):
-        """Called on the main thread when the background scan finishes."""
+
         now = datetime.now().strftime("%H:%M:%S")
-        self.scan_info.setText(f"Last Scan: {now}")
-        self.device_count.setText(f"Monitoring {len(devices)} Devices")
+
+        self.scan_info.setText(
+        f"✓ Scan Complete\nLast Scan : {now}"
+    )
+
+        self.device_count.setText(
+        f"Monitoring {len(devices)} Devices"
+    )
+
         self._refresh_cards(devices)
 
     def _on_scan_error(self, msg):
@@ -430,6 +991,8 @@ class Dashboard(QMainWindow):
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app    = QApplication(sys.argv)
-    window = Dashboard()
-    window.show()
+    splash = SplashScreen()
+    splash.show()
+    #window = Dashboard()
+    #window.show()
     sys.exit(app.exec())
