@@ -115,14 +115,107 @@ def get_device_type(vendor):
 # ─── hostname resolution ──────────────────────────────────────────────────────
 
 def get_hostname(ip):
-    """Reverse DNS, then a numbered fallback."""
+    """
+    Resolve hostname using:
+      1. Reverse DNS
+      2. Avahi (.local)
+      3. DEVICE-xx fallback
+    """
+
+    # Reverse DNS
     try:
         hostname = socket.gethostbyaddr(ip)[0]
+
         if hostname:
             return hostname.split(".")[0].upper()
+
     except Exception:
         pass
+
+    # Avahi / mDNS
+    try:
+        result = subprocess.run(
+            ["avahi-resolve-address", ip],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+
+        if result.returncode == 0:
+
+            hostname = result.stdout.split()[1]
+
+            hostname = hostname.replace(".local", "")
+
+            return hostname.upper()
+
+    except Exception:
+        pass
+
+    # Fallback
     return f"DEVICE-{ip.split('.')[-1]}"
+
+
+def detect_operating_system(ip):
+
+    """
+    Detect the operating system using the SSH banner.
+
+    Returns:
+        Ubuntu
+        Windows
+        SSH Device
+        Unknown
+    """
+
+    try:
+
+        sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM
+        )
+
+        sock.settimeout(0.5)
+
+        if sock.connect_ex((ip,22)) != 0:
+
+            sock.close()
+
+            return "Unknown"
+
+        banner = sock.recv(1024).decode(
+            errors="ignore"
+        ).lower()
+
+        sock.close()
+
+        if "ubuntu" in banner:
+
+            return "Ubuntu"
+
+        elif "openssh_for_windows" in banner:
+
+            return "Windows"
+
+        elif "windows" in banner:
+
+            return "Windows"
+
+        elif "openssh" in banner:
+
+            return "SSH Device"
+
+        else:
+
+            return "Unknown"
+
+    except socket.timeout:
+
+        return "Unknown"
+
+    except Exception:
+
+        return "Unknown"
 
 
 # ─── interface filtering: Wi-Fi & Ethernet only ───────────────────────────────
@@ -283,6 +376,7 @@ def get_local_devices():
             "name":        f"{hostname} (THIS DEVICE)",
             "ip":          ip,
             "mac":         mac,
+            "os":          detect_operating_system(ip),
             "vendor":      "Local Device",
             "device_type": "Computer",
             "status":      "ACTIVE",
@@ -295,8 +389,12 @@ def get_local_devices():
 # ─── ping sweep (populates the OS ARP cache) ───────────────────────────────────
 
 def _ping(ip):
-    """Fire a single ping at ip. We don't care about the result, only that the
-    OS performs ARP resolution and caches the MAC."""
+    """Fire a single ping at ip.
+
+       We don't care about the result,
+       only that the OS performs ARP resolution
+       and caches the MAC.
+    """
     try:
         cmd = ["ping", "-c", "1", "-W", "1", ip]
         subprocess.run(cmd, stdin=subprocess.DEVNULL,
@@ -490,7 +588,7 @@ def get_arp_table():
 
 # ─── main scan ───────────────────────────────────────────────────────────────
 
-def scan_network():
+def scan_network(progress_callback=None):
     """
     Discover devices on the local Wi-Fi / Ethernet network(s).
 
@@ -499,6 +597,8 @@ def scan_network():
     runs unchanged on any machine.
     """
     devices = []
+    if progress_callback:
+        progress_callback(5,"Loading Network Scanner...")
     seen = set()
     now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
@@ -508,6 +608,11 @@ def scan_network():
     _log(f"all interfaces: {all_ifaces}")
 
     interfaces = get_active_interfaces()
+    if progress_callback:
+        progress_callback(10, "Loading Network Module...")
+
+    if progress_callback:
+        progress_callback(20, "Detecting Interfaces...")
     _log(f"selected Wi-Fi/Ethernet interfaces: {interfaces}")
     if not interfaces:
         _log("No active Wi-Fi/Ethernet interface found — showing this device only.")
@@ -517,7 +622,17 @@ def scan_network():
     # devices and drop anything an ARP entry might carry from another adapter.
     own_networks = []
     discovered = {}
+    total_interfaces = len(interfaces)
+    current_interface = 0
     for iface in interfaces:
+        current_interface += 1
+
+        if progress_callback:
+
+           progress = 20 + int((current_interface / total_interfaces) * 20)
+
+           progress_callback(progress,f"Scanning {iface}...")
+
         network = get_interface_network(iface)
         if not network:
             _log(f"  {iface}: could not resolve network — skipped")
@@ -528,6 +643,9 @@ def scan_network():
         except Exception:
             pass
         found = _discover(network)
+        if progress_callback:
+
+           progress_callback(50,"Discovering Network Devices...")
         _log(f"  {iface}: {len(found)} host(s) in ARP cache after probe")
         discovered.update(found)
 
@@ -542,27 +660,105 @@ def scan_network():
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(0.6)
     try:
+        device_total = len(discovered)
+        device_index = 0
+        os_results={}
+        with ThreadPoolExecutor(max_workers=20) as executor:
+
+             futures = {}
+
+             for ip in discovered.keys():
+
+                 futures[ip] = executor.submit(detect_operating_system,ip)
+
+             for ip, future in futures.items():
+
+                 try:
+
+                    os_results[ip] = future.result()
+
+                 except Exception:
+
+                        os_results[ip] = "Unknown"
+
+
+        hostname_results = {}
+
+        with ThreadPoolExecutor(max_workers=64) as executor:
+
+             futures = {}
+
+             for ip in discovered.keys():
+
+                 futures[ip] = executor.submit(get_hostname,ip)
+
+             for ip, future in futures.items():
+
+                 try:
+
+                   hostname_results[ip] = future.result()
+
+                 except Exception:
+
+                   hostname_results[ip] = f"DEVICE-{ip.split('.')[-1]}"
+
+
         for ip, mac in discovered.items():
+            device_index += 1
+
+            if progress_callback and device_total > 0:
+
+               progress = 50 + int((device_index / device_total) * 35)
+
+               if progress < 60:
+
+                  progress_callback(progress, "Resolving Hostnames...")
+
+               elif progress < 70:
+
+                  progress_callback(progress, "Collecting MAC Addresses...")
+
+               elif progress < 80:
+
+                  progress_callback(progress, "Identifying Device Vendor...")
+
+               else:
+
+                  progress_callback(progress, "Building Device Database...")
             if not _in_own_networks(ip) or mac in seen:
                 continue
             seen.add(mac)
 
             vendor = get_vendor(mac)
+            hostname = hostname_results[ip]
+            operating_system = os_results[ip]
             devices.append({
-                "name":        get_hostname(ip),
+                "name":        hostname,
                 "ip":          ip,
                 "mac":         mac,
+                "os":          operating_system,
                 "vendor":      vendor,
                 "device_type": get_device_type(vendor),
                 "status":      "ACTIVE",
                 "first_seen":  _first_seen_cache.setdefault(mac, now),
                 "last_seen":   now,
             })
+            if progress_callback:
+
+               progress_callback(
+        progress,
+        f"DEVICE_COUNT:{len(devices)}"
+    )
     finally:
         socket.setdefaulttimeout(old_timeout)
 
     # Always include this machine (the gateway/router won't ARP-cache ourselves).
+    if progress_callback:
+
+       progress_callback(90,"Building Device Database...")
     for local in get_local_devices():
+        if progress_callback:
+           progress_callback(95,f"DEVICE_COUNT:{len(devices)}")
         if not any(d["mac"] == local["mac"] for d in devices):
             devices.append(local)
         else:
@@ -570,9 +766,14 @@ def scan_network():
                 if d["mac"] == local["mac"]:
                     d.update(name=local["name"], vendor="Local Device",
                              device_type="Computer")
+    if progress_callback:
 
+       progress_callback(95,"Generating Dashboard...")
     devices.sort(key=lambda d: tuple(map(int, d["ip"].split("."))))
     _log(f"Total: {len(devices)} device(s)\n")
+    if progress_callback:
+
+       progress_callback(100,"Loading Complete")
     return devices
 
 
