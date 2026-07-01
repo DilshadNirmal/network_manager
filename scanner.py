@@ -217,6 +217,49 @@ def detect_operating_system(ip):
 
         return "Unknown"
 
+def detect_device_status(ip, operating_system):
+
+    """
+    Returns one of:
+
+    ACTIVE
+    SSH AVAILABLE
+    SSH UNAVAILABLE
+    OFFLINE
+    UNREACHABLE
+    """
+
+    try:
+
+        # Check if host replies to one ping
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", ip],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        if result.returncode != 0:
+            return "OFFLINE"
+
+        # SSH-capable devices
+        if operating_system in (
+            "Ubuntu",
+            "Windows",
+            "SSH Device"
+        ):
+            return "SSH AVAILABLE"
+
+        # Ping works but no SSH detected
+        return "ACTIVE"
+
+    except Exception:
+
+        return "UNREACHABLE"
+
+
+
+
+
 
 # ─── interface filtering: Wi-Fi & Ethernet only ───────────────────────────────
 
@@ -379,7 +422,7 @@ def get_local_devices():
             "os":          detect_operating_system(ip),
             "vendor":      "Local Device",
             "device_type": "Computer",
-            "status":      "ACTIVE",
+            "status":      "ACTIVE (LOCAL)",
             "first_seen":  _first_seen_cache[key],
             "last_seen":   now,
         })
@@ -739,7 +782,7 @@ def scan_network(progress_callback=None):
                 "os":          operating_system,
                 "vendor":      vendor,
                 "device_type": get_device_type(vendor),
-                "status":      "ACTIVE",
+                "status":      detect_device_status(ip,operating_system),
                 "first_seen":  _first_seen_cache.setdefault(mac, now),
                 "last_seen":   now,
             })
