@@ -643,12 +643,60 @@ class DeviceCard(QWidget):
         outer.addWidget(self._make_divider())
 
         # ── Fields ───────────────────────────────────────────────────────────
-        is_active    = self.device["status"].upper() == "ACTIVE"
-        status_color = "#3ddc84" if is_active else "#e05252"
+        status = self.device["status"].upper()
+
+        if status == "ACTIVE":
+
+           status_color = "#3DDC84"
+
+        elif status == "ACTIVE (LOCAL)":
+
+             status_color = "#00FFFF"
+
+        elif status == "SSH AVAILABLE":
+
+             status_color = "#3B82F6"
+
+        elif status == "SSH UNAVAILABLE":
+
+             status_color = "#F59E0B"
+
+        elif status == "OFFLINE":
+
+             status_color = "#FF5555"
+
+        else:
+
+             status_color = "#AAAAAA"
+
+
+        status_icons = {
+
+             "ACTIVE": "🟢",
+
+             "ACTIVE (LOCAL)": "💻",
+
+             "SSH AVAILABLE": "🔐",
+
+             "SSH UNAVAILABLE": "⚠",
+
+             "OFFLINE": "🔴",
+
+             "UNREACHABLE": "❌"
+
+        }
+
+        display_status = (
+             f"{status_icons.get(self.device['status'], '❓')} "
+             f"{self.device['status']}"
+        )
+
+
+
 
         fields = [
-            ("IP Address",  self.device["ip"],                  None),
-            ("Status",      self.device["status"],              status_color),
+            ("IP Address",  self.device["ip"],None),
+            ("Status",display_status,status_color),
             ("Operating System","🐧 Ubuntu"
               if self.device["os"] == "Ubuntu"
               else
