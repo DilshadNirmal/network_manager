@@ -2,7 +2,6 @@ import sys
 import os
 import shutil
 import subprocess
-import netifaces
 from datetime import datetime
 
 from PyQt6.QtCore import (
